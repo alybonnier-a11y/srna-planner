@@ -375,7 +375,7 @@ export default function SRNACommandCenter() {
     saveState({ ...plannerState, savedAt: new Date().toISOString() }, user.uid);
     if (!cloudLoaded) return;
     const timeout = window.setTimeout(async () => {
-      try { await setDoc(getPlannerDocRef(user.uid), { ...plannerState, ownerUid: user.uid, ownerEmail: user.email || "", updatedAt: serverTimestamp() }, { merge: true }); setCloudStatus("Cloud sync saved to your account."); }
+      try { await setDoc(getPlannerDocRef(user.uid), { ...plannerState, ownerUid: user.uid, ownerEmail: user.email || "", updatedAt: serverTimestamp() }); setCloudStatus("Cloud sync saved to your account."); }
       catch (error) { console.warn(error); setCloudStatus("Cloud sync failed. Local autosave still works."); }
     }, 900);
     return () => window.clearTimeout(timeout);
@@ -408,8 +408,7 @@ export default function SRNACommandCenter() {
           ownerUid: user.uid,
           ownerEmail: user.email || "",
           updatedAt: serverTimestamp(),
-        },
-        { merge: true }
+        }
       );
       setCloudStatus("Cloud sync saved to your account.");
       return true;
