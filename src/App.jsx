@@ -382,13 +382,71 @@ export default function SRNACommandCenter() {
   }, [assignments, filter, activeTab, clinical, checked, calendarChecked, weeklyChecked, brainDump, customClinicalSchedule, cloudLoaded, user]);
 
   const handleGoogleSignIn = async () => { try { setCloudStatus("Opening Google sign-in..."); await signInWithPopup(auth, googleProvider); } catch (error) { console.warn(error); setCloudStatus("Google sign-in failed. Make sure Google provider is enabled in Firebase Authentication."); } };
-  const handleSignOut = async () => { await signOut(auth); setUser(null); setCloudStatus("Signed out. Local autosave still works on this device."); };
+  const savePlannerNow = async (override = {}) => {
+    if (!user) return false;
+
+    const plannerState = buildPlannerState({
+      assignments,
+      filter,
+      activeTab,
+      clinical,
+      checked,
+      calendarChecked,
+      weeklyChecked,
+      brainDump,
+      customClinicalSchedule,
+      ...override,
+    });
+
+    saveState({ ...plannerState, savedAt: new Date().toISOString() }, user.uid);
+
+    try {
+      await setDoc(
+        getPlannerDocRef(user.uid),
+        {
+          ...plannerState,
+          ownerUid: user.uid,
+          ownerEmail: user.email || "",
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+      setCloudStatus("Cloud sync saved to your account.");
+      return true;
+    } catch (error) {
+      console.warn(error);
+      setCloudStatus("Cloud sync failed. Local autosave still works.");
+      return false;
+    }
+  };
+
+  const handleSignOut = async () => {
+    await savePlannerNow();
+    await signOut(auth);
+    setUser(null);
+    setCloudStatus("Signed out. Local autosave still works on this device.");
+  };
   const addAssignment = () => { if (!newAssignment.assignment.trim()) return; setAssignments((current) => [{ id: Date.now(), sortDate: "9999-99-99", ...newAssignment, assignment: newAssignment.assignment.trim() }, ...current]); setNewAssignment({ assignment: "", course: "Clinical", due: "", priority: "Medium", status: "Not Started", notes: "" }); };
   const updateAssignment = (id, field, value) => setAssignments((current) => current.map((a) => (a.id === id ? { ...a, [field]: value } : a)));
   const deleteAssignment = (id) => setAssignments((current) => current.filter((a) => a.id !== id));
-  const handleAddClinicalDay = () => { setCustomClinicalSchedule((current) => addClinicalScheduleDay(current, newClinicalDay.month, newClinicalDay.day, newClinicalDay.label || "🩺 Clinical")); setNewClinicalDay({ ...newClinicalDay, day: "" }); setCopyMessage("Clinical day added to your personal schedule."); };
-  const handleRemoveClinicalDay = (month, day) => { setCustomClinicalSchedule((current) => removeClinicalScheduleDay(current, month, day)); setCopyMessage("Clinical day removed from your personal schedule."); };
-  const handleRestoreDefaultClinicalSchedule = () => { setCustomClinicalSchedule(defaultClinicalSchedule); setCopyMessage("Restored the default clinical schedule template."); };
+  const handleAddClinicalDay = async () => {
+    const nextSchedule = addClinicalScheduleDay(customClinicalSchedule, newClinicalDay.month, newClinicalDay.day, newClinicalDay.label || "🩺 Clinical");
+    setCustomClinicalSchedule(nextSchedule);
+    setNewClinicalDay({ ...newClinicalDay, day: "" });
+    await savePlannerNow({ customClinicalSchedule: nextSchedule });
+    setCopyMessage("Clinical day added and saved to your personal schedule.");
+  };
+  const handleRemoveClinicalDay = async (month, day) => {
+    const nextSchedule = removeClinicalScheduleDay(customClinicalSchedule, month, day);
+    setCustomClinicalSchedule(nextSchedule);
+    await savePlannerNow({ customClinicalSchedule: nextSchedule });
+    setCopyMessage("Clinical day removed and saved to your personal schedule.");
+  };
+  const handleRestoreDefaultClinicalSchedule = async () => {
+    setCustomClinicalSchedule(defaultClinicalSchedule);
+    await savePlannerNow({ customClinicalSchedule: defaultClinicalSchedule });
+    setCopyMessage("Restored and saved the default clinical schedule template.");
+  };
   const resetSavedPlanner = () => { clearSavedState(user?.uid); setAssignments(starterAssignments); setFilter("All"); setActiveTab("calendar"); setClinical({ date: "", site: "", preceptor: "", cases: "", airway: "", meds: "", learning: "", review: "" }); setCustomClinicalSchedule(defaultClinicalSchedule); setChecked({}); setCalendarChecked({}); setWeeklyChecked({}); setBrainDump(["", "", "", "", ""]); setCopyMessage("Saved planner progress cleared and reset."); };
   const exportPlanner = () => { downloadPlannerBackup({ assignments, filter, activeTab, clinical, checked, calendarChecked, weeklyChecked, brainDump, customClinicalSchedule, exportedAt: new Date().toISOString() }); setCopyMessage("Planner backup downloaded."); };
   const handleImportPlanner = async (event) => { const file = event.target.files?.[0]; if (!file) return; const imported = await importPlannerBackup(file); if (!imported) return setCopyMessage("Unable to import planner backup."); setAssignments(mergeAssignmentsWithDefaults(imported.assignments || [])); setCustomClinicalSchedule(imported.customClinicalSchedule || defaultClinicalSchedule); setChecked(imported.checked || {}); setCalendarChecked(imported.calendarChecked || {}); setWeeklyChecked(imported.weeklyChecked || {}); setBrainDump(imported.brainDump || ["", "", "", "", ""]); setCopyMessage("Planner backup imported."); };
@@ -417,7 +475,7 @@ export default function SRNACommandCenter() {
   return <div className="min-h-screen bg-slate-50 p-4 text-slate-900 md:p-8"><div className="mx-auto max-w-7xl space-y-6">
     <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between"><div><p className="mb-2 text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">Summer 2026</p><h1 className="text-3xl font-bold tracking-tight md:text-5xl">SRNA Command Center</h1><p className="mt-2 max-w-2xl text-slate-600">Interactive calendar, assignment list, clinical template, and weekly brain dump. Each signed-in student gets a private editable schedule tied to their own Google account.</p></div><div className="grid grid-cols-4 gap-3 md:w-[600px]"><Card className="p-4"><div className="text-xs text-slate-500">Assignments</div><div className="mt-1 text-2xl font-bold">{completion}%</div></Card><Card className="p-4"><div className="text-xs text-slate-500">Active</div><div className="mt-1 text-2xl font-bold">{activeCount}</div></Card><Card className="p-4"><div className="text-xs text-slate-500">Critical</div><div className="mt-1 text-2xl font-bold">{criticalCount}</div></Card><Card className="p-4"><div className="text-xs text-slate-500">Calendar Done</div><div className="mt-1 text-2xl font-bold">{calendarItemCount}</div></Card></div></header>
     {copyMessage ? <div className="rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-700 shadow-sm">{copyMessage}</div> : null}
-    <Card className="p-4"><div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"><div><div className="text-sm font-bold">Autosave + personal Firebase sync</div><div className="text-xs text-slate-600">{authLoading ? "Checking sign-in..." : cloudStatus}</div>{user ? <div className="mt-1 text-xs text-slate-500">Signed in as {user.email} • Private planner ID: {user.uid.slice(0, 8)}</div> : null}</div><div className="flex flex-wrap gap-2">{user ? <ActionButton variant="secondary" onClick={handleSignOut}>Sign out</ActionButton> : <ActionButton onClick={handleGoogleSignIn}>Sign in with Google</ActionButton>}<ActionButton variant="secondary" onClick={exportPlanner}>Export backup</ActionButton><label className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-100">Import backup<input type="file" accept="application/json" className="hidden" onChange={handleImportPlanner} /></label><ActionButton variant="secondary" onClick={resetSavedPlanner}>Reset</ActionButton></div></div></Card>
+    <Card className="p-4"><div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"><div><div className="text-sm font-bold">Autosave + personal Firebase sync</div><div className="text-xs text-slate-600">{authLoading ? "Checking sign-in..." : cloudStatus}</div>{user ? <div className="mt-1 text-xs text-slate-500">Signed in as {user.email} • Private planner ID: {user.uid.slice(0, 8)}</div> : null}</div><div className="flex flex-wrap gap-2">{user ? <ActionButton variant="secondary" onClick={handleSignOut}>Sign out</ActionButton> : <ActionButton onClick={handleGoogleSignIn}>Sign in with Google</ActionButton>}<ActionButton variant="secondary" onClick={() => savePlannerNow()}>Save now</ActionButton><ActionButton variant="secondary" onClick={exportPlanner}>Export backup</ActionButton><label className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-100">Import backup<input type="file" accept="application/json" className="hidden" onChange={handleImportPlanner} /></label><ActionButton variant="secondary" onClick={resetSavedPlanner}>Reset</ActionButton></div></div></Card>
     <nav className="grid grid-cols-5 gap-2 rounded-2xl bg-slate-200 p-1 md:w-[920px]">{[{key:"calendar",label:"📅 Calendar"},{key:"schedule",label:"🗓 Weekly Plan"},{key:"assignments",label:"☑ Assignments"},{key:"clinical",label:"🩺 Clinical"},{key:"brain",label:"🧠 Brain Dump"}].map((tab)=><button key={tab.key} type="button" onClick={()=>setActiveTab(tab.key)} className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${activeTab===tab.key?"bg-white text-slate-900 shadow-sm":"text-slate-600 hover:bg-slate-100"}`}>{tab.label}</button>)}</nav>
 
     {activeTab === "calendar" && <section className="space-y-8"><Card className="p-5"><h2 className="text-2xl font-bold">Interactive Semester Calendar</h2><p className="text-sm text-slate-600">Each student can customize their own clinical dates from the Clinical tab.</p></Card>{calendarMonths.map((month)=>{const monthInfo=monthlyCalendarData[month.name]; const cells=buildCalendarCells(month); return <Card key={month.name} className={`overflow-hidden border-0 bg-gradient-to-br ${monthInfo.color}`}><div className="p-6 md:p-8"><div className="mb-6 flex flex-col gap-3 md:flex-row md:items-end md:justify-between"><div><div className={`text-6xl font-black opacity-70 md:text-8xl ${monthInfo.accent}`}>2026</div><h2 className="-mt-6 text-4xl font-light italic tracking-wide md:text-6xl">{month.name}</h2></div><div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-3"><Badge tone="green">Clinical Days</Badge><Badge tone="purple">Workbook/Care Plan</Badge><Badge tone="blue">SIM</Badge><Badge tone="red">Exams/Quizzes</Badge><Badge tone="orange">Seminar</Badge></div></div><div className="grid grid-cols-7 gap-2 text-center text-xs font-bold uppercase tracking-wide text-slate-500 md:text-sm">{weekdayHeaders.map((d)=><div key={d} className="py-2">{d}</div>)}</div><div className="grid grid-cols-7 gap-2">{cells.map((day,index)=>{const assignmentEvents=day ? monthInfo.events[day] || [] : []; const clinicalEvents=day ? customClinicalSchedule[month.name]?.[day] || [] : []; const events=[...clinicalEvents,...assignmentEvents]; return <div key={`${month.name}-${index}`} className={`min-h-[130px] rounded-2xl border border-white/60 bg-white/60 p-2 backdrop-blur-sm md:min-h-[165px] ${events.length?"shadow-sm":"opacity-70"}`}>{day ? <><div className="mb-2 text-right text-sm font-bold md:text-base">{day}</div><div className="space-y-1">{events.map((event,i)=>{const id=makeEventId(month.name,day,event,i); const done=!!calendarChecked[id]; return <label key={id} className={`flex cursor-pointer items-start gap-1.5 rounded-lg border px-2 py-1 text-[10px] font-medium leading-tight md:text-xs ${getEventTone(event)} ${done?"opacity-55 line-through":""}`}><input type="checkbox" checked={done} onChange={(e)=>setCalendarChecked({...calendarChecked,[id]:e.target.checked})} className="mt-0.5 h-3 w-3 shrink-0"/><span>{event}</span></label>})}</div></> : null}</div>})}</div></div></Card>})}</section>}
