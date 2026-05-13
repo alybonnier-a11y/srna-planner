@@ -216,13 +216,54 @@ function Badge({ children, tone = "slate" }) {
 function buildCalendarCells(month) { const cells = []; for (let i = 0; i < month.start; i++) cells.push(null); for (let d = 1; d <= month.days; d++) cells.push(d); while (cells.length % 7 !== 0) cells.push(null); return cells; }
 function getPriorityTone(priority) { return priority === "Critical" ? "red" : priority === "High" ? "orange" : priority === "Medium" ? "blue" : "green"; }
 function getEventTone(event) {
-  // Color code to match the uploaded Summer 2026 Due Date Calendar:
-  // Clinical = red, SIM = blue, Systems = green, Seminar 1 = orange, Principles 2 = purple.
-  if (event.includes("SIM")) return "border-blue-200 bg-blue-100 text-blue-800";
-  if (event.includes("Systems")) return "border-green-200 bg-green-100 text-green-800";
-  if (event.includes("Seminar")) return "border-orange-200 bg-orange-100 text-orange-800";
-  if (event.includes("Principles") || event.includes("AP2") || event.includes("EXAM")) return "border-purple-200 bg-purple-100 text-purple-800";
-  if (event.includes("Clinical") || event.includes("🩺") || event.includes("eval") || event.includes("care plan") || event.includes("WB") || event.includes("Journal Club") || event.includes("Medatrax")) return "border-red-200 bg-red-100 text-red-800";
+  // Practical app color key:
+  // Clinical days = green
+  // Workbooks / care plans / Medatrax clinical paperwork = purple
+  // SIM = blue
+  // Exams / quizzes = red
+  // Seminar = orange
+  // Systems = yellow/green
+  // General/other = white
+  const lower = event.toLowerCase();
+
+  if (event.includes("🩺") || lower.includes("clinical day")) {
+    return "border-green-200 bg-green-100 text-green-800";
+  }
+
+  if (
+    lower.includes("wb") ||
+    lower.includes("workbook") ||
+    lower.includes("care plan") ||
+    lower.includes("careplan") ||
+    lower.includes("eval screenshot") ||
+    lower.includes("weekly care") ||
+    lower.includes("medatrax") ||
+    lower.includes("journal club")
+  ) {
+    return "border-purple-200 bg-purple-100 text-purple-800";
+  }
+
+  if (lower.includes("sim") || lower.includes("test-out") || lower.includes("test out")) {
+    return "border-blue-200 bg-blue-100 text-blue-800";
+  }
+
+  if (
+    lower.includes("exam") ||
+    lower.includes("quiz") ||
+    lower.includes("final") ||
+    lower.includes("ap2")
+  ) {
+    return "border-red-200 bg-red-100 text-red-800";
+  }
+
+  if (lower.includes("seminar") || lower.includes("presentation") || lower.includes("franciscan")) {
+    return "border-orange-200 bg-orange-100 text-orange-800";
+  }
+
+  if (lower.includes("systems") || lower.includes("discussion board") || lower.includes("db") || lower.includes("assignment")) {
+    return "border-lime-200 bg-lime-100 text-lime-800";
+  }
+
   return "border-slate-200 bg-white text-slate-700";
 }
 function makeEventId(month, day, event, i) { return `${month}-${day}-${i}-${event}`; }
@@ -309,7 +350,7 @@ export default function SRNACommandCenter() {
     <Card className="p-4"><div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"><div><div className="text-sm font-bold">Autosave + personal Firebase sync</div><div className="text-xs text-slate-600">{authLoading ? "Checking sign-in..." : cloudStatus}</div>{user ? <div className="mt-1 text-xs text-slate-500">Signed in as {user.email}</div> : null}</div><div className="flex flex-wrap gap-2">{user ? <ActionButton variant="secondary" onClick={handleSignOut}>Sign out</ActionButton> : <ActionButton onClick={handleGoogleSignIn}>Sign in with Google</ActionButton>}<ActionButton variant="secondary" onClick={exportPlanner}>Export backup</ActionButton><label className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-100">Import backup<input type="file" accept="application/json" className="hidden" onChange={handleImportPlanner} /></label><ActionButton variant="secondary" onClick={resetSavedPlanner}>Reset</ActionButton></div></div></Card>
     <nav className="grid grid-cols-5 gap-2 rounded-2xl bg-slate-200 p-1 md:w-[920px]">{[{key:"calendar",label:"📅 Calendar"},{key:"schedule",label:"🗓 Weekly Plan"},{key:"assignments",label:"☑ Assignments"},{key:"clinical",label:"🩺 Clinical"},{key:"brain",label:"🧠 Brain Dump"}].map((tab)=><button key={tab.key} type="button" onClick={()=>setActiveTab(tab.key)} className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${activeTab===tab.key?"bg-white text-slate-900 shadow-sm":"text-slate-600 hover:bg-slate-100"}`}>{tab.label}</button>)}</nav>
 
-    {activeTab === "calendar" && <section className="space-y-8"><Card className="p-5"><h2 className="text-2xl font-bold">Interactive Semester Calendar</h2><p className="text-sm text-slate-600">Each student can customize their own clinical dates from the Clinical tab.</p></Card>{calendarMonths.map((month)=>{const monthInfo=monthlyCalendarData[month.name]; const cells=buildCalendarCells(month); return <Card key={month.name} className={`overflow-hidden border-0 bg-gradient-to-br ${monthInfo.color}`}><div className="p-6 md:p-8"><div className="mb-6 flex flex-col gap-3 md:flex-row md:items-end md:justify-between"><div><div className={`text-6xl font-black opacity-70 md:text-8xl ${monthInfo.accent}`}>2026</div><h2 className="-mt-6 text-4xl font-light italic tracking-wide md:text-6xl">{month.name}</h2></div><div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-3"><Badge tone="green">Clinical</Badge><Badge tone="red">Exams/Quizzes</Badge><Badge tone="blue">SIM</Badge><Badge tone="orange">Seminar</Badge><Badge tone="purple">Workbook/Care Plan</Badge></div></div><div className="grid grid-cols-7 gap-2 text-center text-xs font-bold uppercase tracking-wide text-slate-500 md:text-sm">{weekdayHeaders.map((d)=><div key={d} className="py-2">{d}</div>)}</div><div className="grid grid-cols-7 gap-2">{cells.map((day,index)=>{const assignmentEvents=day ? monthInfo.events[day] || [] : []; const clinicalEvents=day ? customClinicalSchedule[month.name]?.[day] || [] : []; const events=[...clinicalEvents,...assignmentEvents]; return <div key={`${month.name}-${index}`} className={`min-h-[130px] rounded-2xl border border-white/60 bg-white/60 p-2 backdrop-blur-sm md:min-h-[165px] ${events.length?"shadow-sm":"opacity-70"}`}>{day ? <><div className="mb-2 text-right text-sm font-bold md:text-base">{day}</div><div className="space-y-1">{events.map((event,i)=>{const id=makeEventId(month.name,day,event,i); const done=!!calendarChecked[id]; return <label key={id} className={`flex cursor-pointer items-start gap-1.5 rounded-lg border px-2 py-1 text-[10px] font-medium leading-tight md:text-xs ${getEventTone(event)} ${done?"opacity-55 line-through":""}`}><input type="checkbox" checked={done} onChange={(e)=>setCalendarChecked({...calendarChecked,[id]:e.target.checked})} className="mt-0.5 h-3 w-3 shrink-0"/><span>{event}</span></label>})}</div></> : null}</div>})}</div></div></Card>})}</section>}
+    {activeTab === "calendar" && <section className="space-y-8"><Card className="p-5"><h2 className="text-2xl font-bold">Interactive Semester Calendar</h2><p className="text-sm text-slate-600">Each student can customize their own clinical dates from the Clinical tab.</p></Card>{calendarMonths.map((month)=>{const monthInfo=monthlyCalendarData[month.name]; const cells=buildCalendarCells(month); return <Card key={month.name} className={`overflow-hidden border-0 bg-gradient-to-br ${monthInfo.color}`}><div className="p-6 md:p-8"><div className="mb-6 flex flex-col gap-3 md:flex-row md:items-end md:justify-between"><div><div className={`text-6xl font-black opacity-70 md:text-8xl ${monthInfo.accent}`}>2026</div><h2 className="-mt-6 text-4xl font-light italic tracking-wide md:text-6xl">{month.name}</h2></div><div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-3"><Badge tone="green">Clinical Days</Badge><Badge tone="purple">Workbook/Care Plan</Badge><Badge tone="blue">SIM</Badge><Badge tone="red">Exams/Quizzes</Badge><Badge tone="orange">Seminar</Badge></div></div><div className="grid grid-cols-7 gap-2 text-center text-xs font-bold uppercase tracking-wide text-slate-500 md:text-sm">{weekdayHeaders.map((d)=><div key={d} className="py-2">{d}</div>)}</div><div className="grid grid-cols-7 gap-2">{cells.map((day,index)=>{const assignmentEvents=day ? monthInfo.events[day] || [] : []; const clinicalEvents=day ? customClinicalSchedule[month.name]?.[day] || [] : []; const events=[...clinicalEvents,...assignmentEvents]; return <div key={`${month.name}-${index}`} className={`min-h-[130px] rounded-2xl border border-white/60 bg-white/60 p-2 backdrop-blur-sm md:min-h-[165px] ${events.length?"shadow-sm":"opacity-70"}`}>{day ? <><div className="mb-2 text-right text-sm font-bold md:text-base">{day}</div><div className="space-y-1">{events.map((event,i)=>{const id=makeEventId(month.name,day,event,i); const done=!!calendarChecked[id]; return <label key={id} className={`flex cursor-pointer items-start gap-1.5 rounded-lg border px-2 py-1 text-[10px] font-medium leading-tight md:text-xs ${getEventTone(event)} ${done?"opacity-55 line-through":""}`}><input type="checkbox" checked={done} onChange={(e)=>setCalendarChecked({...calendarChecked,[id]:e.target.checked})} className="mt-0.5 h-3 w-3 shrink-0"/><span>{event}</span></label>})}</div></> : null}</div>})}</div></div></Card>})}</section>}
 
     {activeTab === "schedule" && <section className="space-y-4">{weeklySchedule.map((week,wi)=><Card key={week.week} className="p-5"><h3 className="text-xl font-bold">{week.week}</h3><p className="text-sm text-slate-600">{week.focus}</p><div className="mt-4 space-y-2">{week.tasks.map((task,i)=>{const id=`${wi}-${i}-${task}`; const done=!!weeklyChecked[id]; return <label key={id} className={`flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 ${done?"opacity-55 line-through":""}`}><input type="checkbox" checked={done} onChange={(e)=>setWeeklyChecked({...weeklyChecked,[id]:e.target.checked})} className="mt-1 h-4 w-4"/><span className="text-sm">{task}</span></label>})}</div></Card>)}</section>}
 
