@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { initializeApp } from "firebase/app";
+import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut, getAuth } from "firebase/auth";
 import { doc, getDoc, getFirestore, serverTimestamp, setDoc } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -14,7 +15,12 @@ const firebaseConfig = {
 
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp);
-const PLANNER_DOC_REF = doc(db, "planners", "alyssa-summer-2026");
+const auth = getAuth(firebaseApp);
+const googleProvider = new GoogleAuthProvider();
+
+function getPlannerDocRef(userId) {
+  return doc(db, "users", userId, "planners", "summer-2026");
+}
 
 const clinicalSchedule = {
   // Saha, A tentative Hendricks schedule from email:
@@ -647,6 +653,8 @@ function makeEventId(month, day, event, eventIndex) {
 
 export default function SRNACommandCenter() {
   const savedState = useMemo(() => loadSavedState(), []);
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [assignments, setAssignments] = useState(() => mergeAssignmentsWithDefaults(savedState?.assignments));
   const [filter, setFilter] = useState(savedState?.filter || "All");
   const [activeTab, setActiveTab] = useState(savedState?.activeTab || "calendar");
@@ -657,7 +665,7 @@ export default function SRNACommandCenter() {
   const [weeklyChecked, setWeeklyChecked] = useState(savedState?.weeklyChecked || {});
   const [brainDump, setBrainDump] = useState(savedState?.brainDump || ["", "", "", "", ""]);
   const [copyMessage, setCopyMessage] = useState(savedState ? "Loaded saved planner progress from this browser." : "");
-  const [cloudStatus, setCloudStatus] = useState("Connecting to Firebase...");
+  const [cloudStatus, setCloudStatus] = useState("Sign in to sync across devices.");
   const [cloudLoaded, setCloudLoaded] = useState(false);
 
   const filteredAssignments = useMemo(() => getFilteredAssignments(assignments, filter), [assignments, filter]);
@@ -667,11 +675,28 @@ export default function SRNACommandCenter() {
   const calendarItemCount = Object.keys(calendarChecked).filter((key) => calendarChecked[key]).length;
 
   useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setAuthLoading(false);
+      setCloudLoaded(false);
+
+      if (!currentUser) {
+        setCloudStatus("Sign in with Google to sync your planner across devices.");
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
     let isMounted = true;
 
     async function loadCloudPlanner() {
       try {
-        const snapshot = await getDoc(PLANNER_DOC_REF);
+        setCloudStatus("Loading your planner from Firebase...");
+        const snapshot = await getDoc(getPlannerDocRef(user.uid));
 
         if (!isMounted) return;
 
@@ -685,13 +710,13 @@ export default function SRNACommandCenter() {
           setCalendarChecked(cloud.calendarChecked || {});
           setWeeklyChecked(cloud.weeklyChecked || {});
           setBrainDump(cloud.brainDump || ["", "", "", "", ""]);
-          setCloudStatus("Cloud sync connected. Loaded planner from Firebase.");
+          setCloudStatus("Cloud sync connected. Loaded your personal planner.");
         } else {
-          setCloudStatus("Cloud sync connected. No cloud planner existed yet, so this device will create it.");
+          setCloudStatus("Cloud sync connected. Creating your personal planner...");
         }
       } catch (error) {
         console.warn("Unable to load planner from Firebase.", error);
-        setCloudStatus("Firebase connection failed. Check Firestore setup/rules. Local autosave is still working.");
+        setCloudStatus("Firebase connection failed. Check Authentication/Firestore rules. Local autosave is still working.");
       } finally {
         if (isMounted) setCloudLoaded(true);
       }
@@ -702,7 +727,7 @@ export default function SRNACommandCenter() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     const plannerState = buildPlannerState({ assignments, filter, activeTab, clinical, checked, calendarChecked, weeklyChecked, brainDump });
@@ -716,27 +741,29 @@ export default function SRNACommandCenter() {
       setCopyMessage("Autosave could not save in this browser. Use copy/export as backup.");
     }
 
-    if (!cloudLoaded) return;
+    if (!cloudLoaded || !user) return;
 
     const timeout = window.setTimeout(async () => {
       try {
         await setDoc(
-          PLANNER_DOC_REF,
+          getPlannerDocRef(user.uid),
           {
             ...plannerState,
+            ownerUid: user.uid,
+            ownerEmail: user.email || "",
             updatedAt: serverTimestamp(),
           },
           { merge: true }
         );
-        setCloudStatus("Cloud sync saved.");
+        setCloudStatus("Cloud sync saved to your account.");
       } catch (error) {
         console.warn("Unable to save planner to Firebase.", error);
-        setCloudStatus("Cloud sync failed. Check Firestore database/rules. Local autosave still works.");
+        setCloudStatus("Cloud sync failed. Check Authentication/Firestore rules. Local autosave still works.");
       }
     }, 900);
 
     return () => window.clearTimeout(timeout);
-  }, [assignments, filter, activeTab, clinical, checked, calendarChecked, weeklyChecked, brainDump, cloudLoaded]);
+  }, [assignments, filter, activeTab, clinical, checked, calendarChecked, weeklyChecked, brainDump, cloudLoaded, user]);
 
   const updateAssignment = (id, field, value) => {
     setAssignments((current) => current.map((a) => (a.id === id ? { ...a, [field]: value } : a)));
@@ -762,6 +789,22 @@ export default function SRNACommandCenter() {
   };
 
   const addBrainLine = () => setBrainDump((current) => [...current, ""]);
+
+  const handleGoogleSignIn = async () => {
+    try {
+      setCloudStatus("Opening Google sign-in...");
+      await signInWithPopup(auth, googleProvider);
+    } catch (error) {
+      console.warn("Google sign-in failed.", error);
+      setCloudStatus("Google sign-in failed. Make sure Google provider is enabled in Firebase Authentication.");
+    }
+  };
+
+  const handleSignOut = async () => {
+    await signOut(auth);
+    setUser(null);
+    setCloudStatus("Signed out. Local autosave still works on this device.");
+  };
 
   const exportPlanner = () => {
     const exportData = {
@@ -816,7 +859,7 @@ export default function SRNACommandCenter() {
           <div>
             <p className="mb-2 text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">Summer 2026</p>
             <h1 className="text-3xl font-bold tracking-tight md:text-5xl">SRNA Command Center</h1>
-            <p className="mt-2 max-w-2xl text-slate-600">Interactive calendar, assignment list, clinical template, and weekly brain dump. Autosaves locally and syncs to Firebase for cross-device access.</p>
+            <p className="mt-2 max-w-2xl text-slate-600">Interactive calendar, assignment list, clinical template, and weekly brain dump. Sign in with Google so each student gets their own private planner.</p>
           </div>
 
           <div className="grid grid-cols-4 gap-3 md:w-[600px]">
@@ -844,10 +887,16 @@ export default function SRNACommandCenter() {
         <Card className="p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <div className="text-sm font-bold">Autosave + Firebase sync</div>
-              <div className="text-xs text-slate-600">{cloudStatus}</div>
+              <div className="text-sm font-bold">Autosave + personal Firebase sync</div>
+              <div className="text-xs text-slate-600">{authLoading ? "Checking sign-in..." : cloudStatus}</div>
+              {user ? <div className="mt-1 text-xs text-slate-500">Signed in as {user.email}</div> : null}
             </div>
             <div className="flex flex-wrap gap-2">
+              {user ? (
+                <ActionButton variant="secondary" onClick={handleSignOut}>Sign out</ActionButton>
+              ) : (
+                <ActionButton variant="primary" onClick={handleGoogleSignIn}>Sign in with Google</ActionButton>
+              )}
               <ActionButton variant="secondary" onClick={exportPlanner}>Export backup</ActionButton>
               <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 transition hover:bg-slate-100">
                 Import backup
